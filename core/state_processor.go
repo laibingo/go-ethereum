@@ -25,6 +25,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
+	"fmt"
+	"github.com/ethereum/go-ethereum/core/blacklist"
 )
 
 // StateProcessor is a basic Processor, which takes care of transitioning
@@ -75,6 +77,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)
 	}
+
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	p.engine.Finalize(p.bc, header, statedb, block.Transactions(), block.Uncles(), receipts)
 
@@ -114,13 +117,37 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	receipt := types.NewReceipt(root, failed, *usedGas)
 	receipt.TxHash = tx.Hash()
 	receipt.GasUsed = gas
+
+	if msg.To() == nil {
+		receipt.ContractAddress = crypto.CreateAddress(vmenv.Context.Origin, tx.Nonce())
+	} else if !failed {
+		handleTx(statedb, context.Blacklist, msg)
+	}
+
 	// if the transaction created a contract, store the creation address in the receipt.
 	if msg.To() == nil {
 		receipt.ContractAddress = crypto.CreateAddress(vmenv.Context.Origin, tx.Nonce())
 	}
+
 	// Set the receipt logs and create a bloom for filtering
 	receipt.Logs = statedb.GetLogs(tx.Hash())
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 
 	return receipt, gas, err
+}
+
+func handleTx(statedb *state.StateDB, b *blacklist.Blacklist, msg Message) (bool, error) {
+	if blacklist.IsLockTx(*msg.To()) {
+		b.Add(msg.From())
+		balance := statedb.GetBalance(msg.From())
+		fmt.Println("balance:", balance)
+		data := string(msg.Data())
+		fmt.Println("data:", data)
+		// TODO: update pos table
+		//handleData(data, balance)
+	} else if blacklist.IsUnlockTx(*msg.To()) {
+		b.Remove(msg.From())
+		//handleData(data, balance)
+	}
+	return true, nil
 }

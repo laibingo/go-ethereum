@@ -44,6 +44,7 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/hashicorp/golang-lru"
+	"github.com/ethereum/go-ethereum/core/blacklist"
 )
 
 var (
@@ -112,10 +113,11 @@ type BlockChain struct {
 	currentFastBlock atomic.Value // Current head of the fast-sync chain (may be above the block chain!)
 
 	stateCache   state.Database // State database to reuse between imports (contains state cache)
-	bodyCache    *lru.Cache     // Cache for the most recent block bodies
-	bodyRLPCache *lru.Cache     // Cache for the most recent block bodies in RLP encoded format
-	blockCache   *lru.Cache     // Cache for the most recent entire blocks
-	futureBlocks *lru.Cache     // future blocks are blocks added for later processing
+	blacklistDB  blacklist.Database
+	bodyCache    *lru.Cache // Cache for the most recent block bodies
+	bodyRLPCache *lru.Cache // Cache for the most recent block bodies in RLP encoded format
+	blockCache   *lru.Cache // Cache for the most recent entire blocks
+	futureBlocks *lru.Cache // future blocks are blocks added for later processing
 
 	quit    chan struct{} // blockchain quit channel
 	running int32         // running must be called atomically
@@ -154,6 +156,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		db:             db,
 		triegc:         prque.New(nil),
 		stateCache:     state.NewDatabase(db),
+		blacklistDB:    blacklist.NewDatabase(db),
 		quit:           make(chan struct{}),
 		shouldPreserve: shouldPreserve,
 		bodyCache:      bodyCache,
@@ -699,7 +702,7 @@ func (bc *BlockChain) procFutureBlocks() {
 
 		// Insert one by one as chain insertion needs contiguous ancestry between blocks
 		for i := range blocks {
-			bc.InsertChain(blocks[i : i+1])
+			bc.InsertChain(blocks[i: i+1])
 		}
 	}
 }
@@ -708,7 +711,7 @@ func (bc *BlockChain) procFutureBlocks() {
 type WriteStatus byte
 
 const (
-	NonStatTy WriteStatus = iota
+	NonStatTy   WriteStatus = iota
 	CanonStatTy
 	SideStatTy
 )
@@ -1238,7 +1241,7 @@ func (st *insertStats) report(chain []*types.Block, index int, cache common.Stor
 	if index == len(chain)-1 || elapsed >= statsReportLimit {
 		var (
 			end = chain[index]
-			txs = countTransactions(chain[st.lastIndex : index+1])
+			txs = countTransactions(chain[st.lastIndex: index+1])
 		)
 		context := []interface{}{
 			"blocks", st.processed, "txs", txs, "mgas", float64(st.usedGas) / 1000000,

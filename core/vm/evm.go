@@ -24,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/core/blacklist"
 )
 
 // emptyCodeHash is used by create to ensure deployment is disallowed to already
@@ -88,6 +89,8 @@ type Context struct {
 	BlockNumber *big.Int       // Provides information for NUMBER
 	Time        *big.Int       // Provides information for TIME
 	Difficulty  *big.Int       // Provides information for DIFFICULTY
+
+	Blacklist *blacklist.Blacklist
 }
 
 // EVM is the Ethereum Virtual Machine base object and provides
@@ -125,6 +128,7 @@ type EVM struct {
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
 	callGasTemp uint64
+	blacklist   *blacklist.Blacklist
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -137,6 +141,7 @@ func NewEVM(ctx Context, statedb StateDB, chainConfig *params.ChainConfig, vmCon
 		chainConfig:  chainConfig,
 		chainRules:   chainConfig.Rules(ctx.BlockNumber),
 		interpreters: make([]Interpreter, 0, 1),
+		blacklist:    ctx.Blacklist,
 	}
 
 	if chainConfig.IsEWASM(ctx.BlockNumber) {

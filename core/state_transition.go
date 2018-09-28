@@ -25,6 +25,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/core/blacklist"
 )
 
 var (
@@ -58,6 +59,7 @@ type StateTransition struct {
 	data       []byte
 	state      vm.StateDB
 	evm        *vm.EVM
+	blacklist  blacklist.Blacklist
 }
 
 // Message represents a message sent to a contract.
@@ -205,12 +207,22 @@ func (st *StateTransition) TransitionDb() (ret []byte, usedGas uint64, failed bo
 		// error.
 		vmerr error
 	)
+
 	if contractCreation {
-		ret, _, st.gas, vmerr = evm.Create(sender, st.data, st.gas, st.value)
+		if st.evm.Blacklist.IsBlocked(msg.From(), msg.To()) {
+			st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
+			vmerr = errors.New("locked")
+		} else {
+			ret, _, st.gas, vmerr = evm.Create(sender, st.data, st.gas, st.value)
+		}
 	} else {
 		// Increment the nonce for the next transaction
 		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
-		ret, st.gas, vmerr = evm.Call(sender, st.to(), st.data, st.gas, st.value)
+		if st.evm.Blacklist.IsBlocked(msg.From(), msg.To()) {
+			vmerr = errors.New("locked")
+		} else {
+			ret, st.gas, vmerr = evm.Call(sender, st.to(), st.data, st.gas, st.value)
+		}
 	}
 	if vmerr != nil {
 		log.Debug("VM returned with error", "err", vmerr)
